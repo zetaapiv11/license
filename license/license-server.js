@@ -322,3 +322,118 @@ server.on('error', (err) => {
 
 process.on('SIGINT',  () => { saveDB(); console.log('\n✅ Server dihentikan.'); process.exit(0); });
 process.on('SIGTERM', () => { saveDB(); console.log('\n✅ Server dihentikan.'); process.exit(0); });
+infoM) {
+    const k = infoM[1].toUpperCase();
+    const l = db.licenses[k];
+    if (!l) return sendJSON(res, 404, { success: false, message: 'Tidak ditemukan' });
+    return sendJSON(res, 200, { success: true, license: { ...l, days_left: daysLeft(l), is_expired: isExpired(l), is_revoked: db.revoked.includes(k) } });
+  }
+
+  // ── POST /api/admin/revoke ── Cabut lisensi
+  if (m === 'POST' && p === '/api/admin/revoke') {
+    let body; try { body = await readBody(req); } catch (e) { return sendJSON(res, 400, { success: false, message: e.message }); }
+    const key = (body.key || '').toUpperCase();
+    if (!db.licenses[key]) return sendJSON(res, 404, { success: false, message: 'Tidak ditemukan' });
+    if (!db.revoked.includes(key)) { db.revoked.push(key); saveDB(); }
+    log(`[REVOKE] Key: ${key}`);
+    return sendJSON(res, 200, { success: true, message: `Lisensi ${key} dicabut` });
+  }
+
+  // ── POST /api/admin/restore ── Pulihkan lisensi
+  if (m === 'POST' && p === '/api/admin/restore') {
+    let body; try { body = await readBody(req); } catch (e) { return sendJSON(res, 400, { success: false, message: e.message }); }
+    const key = (body.key || '').toUpperCase();
+    db.revoked = db.revoked.filter(k => k !== key);
+    saveDB();
+    log(`[RESTORE] Key: ${key}`);
+    return sendJSON(res, 200, { success: true, message: `Lisensi ${key} dipulihkan` });
+  }
+
+  // ── POST /api/admin/reset-machines ── Reset mesin
+  if (m === 'POST' && p === '/api/admin/reset-machines') {
+    let body; try { body = await readBody(req); } catch (e) { return sendJSON(res, 400, { success: false, message: e.message }); }
+    const key = (body.key || '').toUpperCase();
+    if (!db.licenses[key]) return sendJSON(res, 404, { success: false, message: 'Tidak ditemukan' });
+    db.licenses[key].machines     = [];
+    db.licenses[key].machineNames = [];
+    saveDB();
+    log(`[RESET-MACHINES] Key: ${key}`);
+    return sendJSON(res, 200, { success: true, message: `Mesin ${key} direset` });
+  }
+
+  // ── POST /api/admin/delete ── Hapus lisensi
+  if (m === 'POST' && p === '/api/admin/delete') {
+    let body; try { body = await readBody(req); } catch (e) { return sendJSON(res, 400, { success: false, message: e.message }); }
+    const key = (body.key || '').toUpperCase();
+    if (!db.licenses[key]) return sendJSON(res, 404, { success: false, message: 'Tidak ditemukan' });
+    delete db.licenses[key];
+    db.revoked = db.revoked.filter(k => k !== key);
+    saveDB();
+    log(`[DELETE] Key: ${key}`);
+    return sendJSON(res, 200, { success: true, message: `Lisensi ${key} dihapus` });
+  }
+
+  // ── 404 ──
+  return sendJSON(res, 404, { success: false, message: `${m} ${p} tidak ditemukan` });
+});
+
+// ─── START ───────────────────────────────────────────
+server.listen(CONFIG.PORT, '0.0.0.0', () => {
+  console.log('');
+  console.log('╔══════════════════════════════════════════════════╗');
+  console.log('║   ZEETASI LICENSE SERVER V1.0 — BERJALAN         ║');
+  console.log('╚══════════════════════════════════════════════════╝');
+  console.log('');
+  console.log(`  📡 Port           : ${CONFIG.PORT}`);
+  console.log(`  📁 Database       : ${CONFIG.LICENSE_FILE}`);
+  console.log(`  📋 Total Lisensi  : ${Object.keys(db.licenses).length}`);
+  console.log('');
+  console.log('  ┌─────────────────────────────────────────────┐');
+  console.log('  │  🔑 ADMIN TOKEN (salin untuk bot Telegram)  │');
+  console.log(`  │  ${ADMIN_TOKEN.padEnd(45)} │`);
+  console.log('  └─────────────────────────────────────────────┘');
+  console.log('');
+  console.log('  📌 LANGKAH SELANJUTNYA:');
+  console.log('  Di bot Telegram, kirim perintah ini ke Owner:');
+  console.log('');
+
+  // Coba deteksi IP publik
+  require('https').get('https://api.ipify.org', (r) => {
+    let ip = '';
+    r.on('data', d => { ip += d; });
+    r.on('end', () => {
+      ip = ip.trim();
+      console.log(`  /setlicenseserver ${ip} ${CONFIG.PORT} ${ADMIN_TOKEN}`);
+      console.log('');
+      console.log(`  Atau jika IP berbeda:`);
+      console.log(`  /setlicenseserver [IP_VPS_ANDA] ${CONFIG.PORT} ${ADMIN_TOKEN}`);
+      console.log('');
+      console.log('  ─────────────────────────────────────────────');
+      console.log('  ENDPOINT API:');
+      console.log(`  GET  http://0.0.0.0:${CONFIG.PORT}/                     Status`);
+      console.log(`  POST http://0.0.0.0:${CONFIG.PORT}/api/validate          Validasi key`);
+      console.log(`  POST http://0.0.0.0:${CONFIG.PORT}/api/activate          Aktivasi key`);
+      console.log(`  POST http://0.0.0.0:${CONFIG.PORT}/api/admin/create      Buat lisensi`);
+      console.log(`  GET  http://0.0.0.0:${CONFIG.PORT}/api/admin/list        Daftar lisensi`);
+      console.log(`  POST http://0.0.0.0:${CONFIG.PORT}/api/admin/revoke      Cabut lisensi`);
+      console.log(`  POST http://0.0.0.0:${CONFIG.PORT}/api/admin/delete      Hapus lisensi`);
+      console.log('');
+    });
+  }).on('error', () => {
+    console.log(`  /setlicenseserver [IP_VPS] ${CONFIG.PORT} ${ADMIN_TOKEN}`);
+    console.log('');
+  });
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`❌ Port ${CONFIG.PORT} sudah digunakan!`);
+    console.error(`   Ganti PORT: PORT=3002 node license-server.js`);
+  } else {
+    console.error('❌ Server error:', err.message);
+  }
+  process.exit(1);
+});
+
+process.on('SIGINT',  () => { saveDB(); console.log('\n✅ Server dihentikan.'); process.exit(0); });
+process.on('SIGTERM', () => { saveDB(); console.log('\n✅ Server dihentikan.'); process.exit(0); });
